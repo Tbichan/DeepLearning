@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import tensorflow as tf
 import os
+import time
 
 # Batch Normalization
 def batch_normalization(shape, input, name="bn", withGamma=False):
@@ -68,7 +69,7 @@ INPUT_NUM = INPUT_W*INPUT_H*INPUT_C
 TRAIN_NUM = 180
 
 # ミニバッチ数
-MINI_BATCH = 36
+MINI_BATCH = 2
 
 class Generator(object):
 
@@ -187,9 +188,6 @@ class Discriminator(object):
                 self.b_fc5 = tf.get_variable('b_fc5', [1], initializer=bias_init)
                 h_conv4_flat = tf.reshape(h_conv4, [-1, 4*4*2048])
                 linarg = tf.matmul(h_conv4_flat, self.W_fc5) + self.b_fc5
-
-                #Dropout
-                
                 
                 h5 = tf.nn.sigmoid(linarg)
                 
@@ -289,13 +287,13 @@ d_loss, g_loss, d_vars, g_vars, fake_img, d_fake, d_true = make_model(z, images)
 # オプティマイザ定義
 #learning_g_rate = 0.001
 #learning_d_rate = 0.0001
-learning_g_rate = 0.0002
-learning_d_rate = 0.0002
+learning_g_rate = 0.0001
+learning_d_rate = 0.0001
 
-d_optim = tf.train.AdamOptimizer(learning_d_rate, beta1=0.5) \
+d_optim = tf.train.AdamOptimizer(learning_d_rate) \
               .minimize(d_loss, var_list=d_vars)
 
-g_optim = tf.train.AdamOptimizer(learning_g_rate, beta1=0.5) \
+g_optim = tf.train.AdamOptimizer(learning_g_rate) \
 .minimize(g_loss, var_list=g_vars)
 
 
@@ -341,7 +339,7 @@ class CVBatch:
             # シャッフル
             #l = len(self.images)
             #rnd1 = np.random.randint(0, l)
-            np.random.shuffle(self.images)
+            #np.random.shuffle(self.images)
         else:
             self.nowIndex = end
             res = self.images[start:end]
@@ -368,7 +366,7 @@ with tf.Session() as sess:
 
     saver = tf.train.Saver()
 
-    #saver.restore(sess, "./model/model.ckpt")
+    saver.restore(sess, "./model/model.ckpt")
 
     for i in range(100000):
 
@@ -379,16 +377,11 @@ with tf.Session() as sess:
         for j in range(num):
             zInput[j] = np.array([(2.0 * np.random.rand() - 1.0) for k in range(100)])
         
-        g_optim.run(feed_dict={z:zInput, images:img_input})
-        d_optim.run(feed_dict={z:zInput, images:img_input})
-        if i % 10 == 0:
-            loss_val_d, loss_val_g, img, d_f, d_t  = sess.run([g_loss, d_loss, fake_img, d_fake, d_true], feed_dict={z:zInput, images:img_input})
-            #print(d_f)
-            print("Step:%4d, Loss{G:%2.8f, D:%2.8f} fake:%2.8f true:%2.8f"%(i,loss_val_g, loss_val_d, np.average(d_f), np.average(d_t)))
-            
-            #cv2.imshow('image', img[0])
-            #cv2.waitKey(0)
-            for j in range(10):
-                cv2.imwrite('./res/'+str(i) + "-" + str(j)+'.jpg', img[j]*255)
-        if i % 100 == 0:
-            saver.save(sess, "./model/model.ckpt")
+        #print(zInput)
+ 
+        loss_val_d, loss_val_g, img, d_f, d_t  = sess.run([g_loss, d_loss, fake_img, d_fake, d_true], feed_dict={z:zInput, images:img_input})
+
+        for j in range(num):
+            cv2.imshow('image', img[j])
+            cv2.waitKey(0)
+            #cv2.imwrite('./create/'+str(i) + "-" + str(j)+'.jpg', img[j]*255)

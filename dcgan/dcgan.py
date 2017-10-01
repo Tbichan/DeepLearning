@@ -54,7 +54,7 @@ def deconv2d(input_, output_shape,
     deconv = tf.reshape(tf.nn.bias_add(deconv, biases), deconv.get_shape())
 
     if with_w:
-      return deconv, w, biases
+        return deconv, w, biases
     else:
         return deconv
 
@@ -68,7 +68,7 @@ INPUT_NUM = INPUT_W*INPUT_H*INPUT_C
 TRAIN_NUM = 180
 
 # ミニバッチ数
-MINI_BATCH = 36
+MINI_BATCH = 16
 
 class Generator(object):
 
@@ -86,8 +86,11 @@ class Generator(object):
             self.b_fc1 = tf.get_variable('b_fc1', [4*4*2048], initializer=bias_init)
 
             linarg = tf.matmul(input, self.W_fc1) + self.b_fc1
-            bn1, gamma_bn1, beta_bn1 = batch_normalization(4*4*2048, linarg, name='bn1', withGamma=True)
-            relu_fc1 = tf.nn.relu(bn1)
+            gamma_bn1, beta_bn1 = tf.nn.moments(linarg, [0,1], name='bn1')
+            relu_fc1 = tf.nn.relu(tf.nn.batch_normalization(linarg, gamma_bn1, beta_bn1, None , None,1e-5,name='bn1'))
+            
+            #bn1, gamma_bn1, beta_bn1 = batch_normalization(4*4*2048, linarg, name='bn1', withGamma=True)
+            #relu_fc1 = tf.nn.relu(bn1)
     
             # 逆畳み込み層1
             relu1_image = tf.reshape(relu_fc1, [MINI_BATCH, 4, 4, 2048])
@@ -322,7 +325,7 @@ def img_flat_read(fpass):
 class CVBatch:
     def __init__(self, num):
         self.num = num
-        self.images = np.zeros([TRAIN_NUM, INPUT_NUM])
+        self.images = np.zeros([num, INPUT_NUM])
         self.nowCnt = 0
         self.nowIndex = 0
     def loadImage(self, fpass):
@@ -331,6 +334,8 @@ class CVBatch:
         return img
     
     def nextBatch(self, n):
+
+        """
         start = self.nowIndex
         end = self.nowIndex+n
         if end >= self.num:
@@ -345,7 +350,10 @@ class CVBatch:
         else:
             self.nowIndex = end
             res = self.images[start:end]
-        return res, end - start
+        """
+        res = self.images[0:n]
+        np.random.shuffle(self.images)
+        return res
         
     
 
@@ -373,10 +381,10 @@ with tf.Session() as sess:
     for i in range(100000):
 
         # バッチをとってくる
-        img_input, num = CVBatch.nextBatch(cvBatch, MINI_BATCH)
+        img_input = CVBatch.nextBatch(cvBatch, MINI_BATCH)
         
         zInput = np.zeros([MINI_BATCH, 100])
-        for j in range(num):
+        for j in range(MINI_BATCH):
             zInput[j] = np.array([(2.0 * np.random.rand() - 1.0) for k in range(100)])
         
         g_optim.run(feed_dict={z:zInput, images:img_input})

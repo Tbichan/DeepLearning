@@ -69,14 +69,14 @@ INPUT_NUM = INPUT_W*INPUT_H*INPUT_C
 TRAIN_NUM = 180
 
 # ミニバッチ数
-MINI_BATCH = 2
+MINI_BATCH = 1
 
 class Generator(object):
 
     def __init__(self, input, in_num, name='generator'):
 
         # 重み、バイアスを定義
-        self.input = input
+        #self.input = input
     
         with tf.variable_scope(name):
 
@@ -87,8 +87,13 @@ class Generator(object):
             self.b_fc1 = tf.get_variable('b_fc1', [4*4*2048], initializer=bias_init)
 
             linarg = tf.matmul(input, self.W_fc1) + self.b_fc1
-            bn1, gamma_bn1, beta_bn1 = batch_normalization(4*4*2048, linarg, name='bn1', withGamma=True)
-            relu_fc1 = tf.nn.relu(bn1)
+            gamma_bn1, beta_bn1 = tf.nn.moments(linarg, [0,1], name='bn1')
+            relu_fc1 = tf.nn.relu(tf.nn.batch_normalization(linarg, gamma_bn1, beta_bn1, None , None,1e-5,name='bn1'))
+            
+            #bn1, gamma_bn1, beta_bn1 = batch_normalization(4*4*2048, linarg, name='bn1', withGamma=True)
+            #relu_fc1 = tf.nn.relu(bn1)
+
+            self.tmp = relu_fc1
     
             # 逆畳み込み層1
             relu1_image = tf.reshape(relu_fc1, [MINI_BATCH, 4, 4, 2048])
@@ -124,9 +129,8 @@ class Generator(object):
             
             self.output = tf.nn.sigmoid(deconv6)
             
-            
     def output(self):
-        return self.output
+        return self.output, self.tmp
 
 class Discriminator(object):
 
@@ -257,7 +261,9 @@ images = tf.placeholder("float", [None, 128*128*3])
 
 def make_model(z, images):
     g = Generator(z, 100)
-    fake_img = Generator.output(g)
+    
+    fake_img, tmp = Generator.output(g)
+    print(tmp)
     d_fake = Discriminator(fake_img)                # 偽物用
     d_fake_out, d_logits_f = Discriminator.output(d_fake)
     d_true = Discriminator(images, reuse=True)      # 本物用(重み共有)
@@ -279,10 +285,10 @@ def make_model(z, images):
     d_vars = [var for var in t_vars if 'discriminator' in var.name]
     g_vars = [var for var in t_vars if 'generator' in var.name]
 
-    return d_loss, g_loss, d_vars, g_vars, fake_img, d_fake_out, d_true_out
+    return d_loss, g_loss, d_vars, g_vars, fake_img, d_fake_out, d_true_out, tmp
 
 # モデル作成
-d_loss, g_loss, d_vars, g_vars, fake_img, d_fake, d_true = make_model(z, images)
+d_loss, g_loss, d_vars, g_vars, fake_img, d_fake, d_true, tmp = make_model(z, images)
 
 # オプティマイザ定義
 #learning_g_rate = 0.001
@@ -366,7 +372,7 @@ with tf.Session() as sess:
 
     saver = tf.train.Saver()
 
-    saver.restore(sess, "./model/model.ckpt")
+    #saver.restore(sess, "./model/model.ckpt")
 
     for i in range(100000):
 
@@ -376,12 +382,12 @@ with tf.Session() as sess:
         zInput = np.zeros([MINI_BATCH, 100])
         for j in range(num):
             zInput[j] = np.array([(2.0 * np.random.rand() - 1.0) for k in range(100)])
-        
-        #print(zInput)
  
-        loss_val_d, loss_val_g, img, d_f, d_t  = sess.run([g_loss, d_loss, fake_img, d_fake, d_true], feed_dict={z:zInput, images:img_input})
+        img, tp  = sess.run([fake_img, tmp], feed_dict={z:zInput})
+        
+        print(tp)
 
         for j in range(num):
             cv2.imshow('image', img[j])
             cv2.waitKey(0)
-            #cv2.imwrite('./create/'+str(i) + "-" + str(j)+'.jpg', img[j]*255)
+            cv2.imwrite('./create/'+str(i) + "-" + str(j)+'.jpg', img[j]*255)

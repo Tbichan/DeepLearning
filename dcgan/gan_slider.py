@@ -2,7 +2,23 @@ import numpy as np
 import cv2
 import tensorflow as tf
 import os
+import time
+import math
+import wx
 from numpy.random import *
+
+# Batch Normalization
+def batch_normalization(shape, input, name="bn", withGamma=False):
+    with tf.variable_scope(name):
+        gamma_init= tf.truncated_normal_initializer(mean=0.0, stddev=0.05)
+        gamma = tf.get_variable('gamma', [shape], initializer=gamma_init)
+        beta_init= tf.truncated_normal_initializer(mean=0.0, stddev=0.05)
+        beta = tf.get_variable('beta', [shape], initializer=beta_init)
+        mean, variance = tf.nn.moments(input, [0])
+    if withGamma == False:
+        return gamma * (input - mean) / tf.sqrt(variance + 1e-5) + beta
+    else:
+        return gamma * (input - mean) / tf.sqrt(variance + 1e-5) + beta, gamma, beta
 
 def conv2d(input_, output_dim, 
        k_h=5, k_w=5, d_h=2, d_w=2, stddev=0.02,
@@ -42,7 +58,7 @@ def deconv2d(input_, output_shape,
     deconv = tf.reshape(tf.nn.bias_add(deconv, biases), deconv.get_shape())
 
     if with_w:
-        return deconv, w, biases
+      return deconv, w, biases
     else:
         return deconv
 
@@ -53,17 +69,17 @@ INPUT_W = 128
 INPUT_H = 128
 INPUT_C = 3
 INPUT_NUM = INPUT_W*INPUT_H*INPUT_C
-TRAIN_NUM = 294*2
+TRAIN_NUM = 180
 
 # ミニバッチ数
-MINI_BATCH = 36
+MINI_BATCH = 1
 
 class Generator(object):
 
     def __init__(self, input, in_num, name='generator'):
 
         # 重み、バイアスを定義
-        self.input = input
+        #self.input = input
     
         with tf.variable_scope(name):
 
@@ -74,46 +90,47 @@ class Generator(object):
             self.b_fc1 = tf.get_variable('b_fc1', [4*4*2048], initializer=bias_init)
 
             linarg = tf.matmul(input, self.W_fc1) + self.b_fc1
-            gamma_bn1, beta_bn1 = tf.nn.moments(linarg, [0, 1], name='bn1')
-            relu_fc1 = lrelu(tf.nn.batch_normalization(linarg, gamma_bn1, beta_bn1, None , None,1e-5,name='bn1'))
+            gamma_bn1, beta_bn1 = tf.nn.moments(linarg, [0,1], name='bn1')
+            relu_fc1 = tf.nn.relu(tf.nn.batch_normalization(linarg, gamma_bn1, beta_bn1, None , None,1e-5,name='bn1'))
             
             #bn1, gamma_bn1, beta_bn1 = batch_normalization(4*4*2048, linarg, name='bn1', withGamma=True)
             #relu_fc1 = tf.nn.relu(bn1)
+
+            self.tmp = relu_fc1
     
             # 逆畳み込み層1
             relu1_image = tf.reshape(relu_fc1, [MINI_BATCH, 4, 4, 2048])
             deconv2, self.W_deconv2, self.b_deconv2 = \
                      deconv2d(relu1_image, [MINI_BATCH, 8, 8, 1024], name='deconv_2', with_w=True)
             gamma_bn2, beta_bn2 = tf.nn.moments(deconv2, [0,1,2], name='bn2')
-            h_conv2 = lrelu(tf.nn.batch_normalization(deconv2, gamma_bn2, beta_bn2, None , None,1e-5,name='bn2'))
+            h_conv2 = tf.nn.relu(tf.nn.batch_normalization(deconv2, gamma_bn2, beta_bn2, None , None,1e-5,name='bn2'))
 
             # 逆畳み込み層2
             deconv3, self.W_deconv3, self.b_deconv3 = \
                      deconv2d(h_conv2, [MINI_BATCH, 16, 16, 512], name='deconv_3', with_w=True)
             # Batch Normalization, ReLu
             gamma_bn3, beta_bn3 = tf.nn.moments(deconv3, [0,1,2], name='bn3')
-            h_conv3 = lrelu(tf.nn.batch_normalization(deconv3, gamma_bn3, beta_bn3, None , None,1e-5,name='bn3'))
+            h_conv3 = tf.nn.relu(tf.nn.batch_normalization(deconv3, gamma_bn3, beta_bn3, None , None,1e-5,name='bn3'))
 
             # 逆畳み込み層3
             deconv4, self.W_deconv4, self.b_deconv4 = \
                      deconv2d(h_conv3, [MINI_BATCH, 32, 32, 256], name='deconv_4', with_w=True)
             # Batch Normalization, ReLu
             gamma_bn4, beta_bn4 = tf.nn.moments(deconv4, [0,1,2], name='bn4')
-            h_conv4 = lrelu(tf.nn.batch_normalization(deconv4, gamma_bn4, beta_bn4, None , None,1e-5,name='bn4'))
+            h_conv4 = tf.nn.relu(tf.nn.batch_normalization(deconv4, gamma_bn4, beta_bn4, None , None,1e-5,name='bn4'))
 
             # 逆畳み込み層4
             deconv5, self.W_deconv5, self.b_deconv5 = \
                      deconv2d(h_conv4, [MINI_BATCH, 64, 64, 128], name='deconv_5', with_w=True)
             # Batch Normalization, ReLu
             gamma_bn5, beta_bn5 = tf.nn.moments(deconv5, [0,1,2], name='bn5')
-            h_conv5 = lrelu(tf.nn.batch_normalization(deconv5, gamma_bn5, beta_bn5, None , None,1e-5,name='bn5'))
+            h_conv5 = tf.nn.relu(tf.nn.batch_normalization(deconv5, gamma_bn5, beta_bn5, None , None,1e-5,name='bn5'))
 
             # 逆畳み込み層5
             deconv6, self.W_deconv6, self.b_deconv6 = \
                      deconv2d(h_conv5, [MINI_BATCH, 128, 128, 3], name='deconv_6', with_w=True)
             
             self.output = tf.nn.tanh(deconv6)
-            
             
     def output(self):
         return self.output
@@ -127,7 +144,7 @@ class Discriminator(object):
 
         if not reuse:
             with tf.variable_scope(name):
-
+                
                 # 畳み込み0
                 input_image = tf.reshape(input, [-1, 128, 128, 3])
                 weight_init = tf.truncated_normal_initializer(mean=0.0, stddev=0.05)
@@ -236,7 +253,7 @@ class Discriminator(object):
                 #h_conv4 = lrelu(aff_conv4)
 
                 # 全結合層
-                self.W_fc5 = tf.get_variable('W_fc5', [4*4*2048, 1]) # 4*4*2048
+                self.W_fc5 = tf.get_variable('W_fc5', [4*4*2048, 1])
                 self.b_fc5 = tf.get_variable('b_fc5', [1])
                 h_conv4_flat = tf.reshape(h_conv4, [-1, 4*4*2048])
                 linarg = tf.matmul(h_conv4_flat, self.W_fc5) + self.b_fc5
@@ -245,8 +262,8 @@ class Discriminator(object):
                 #h5_drop = tf.nn.dropout(h5, keep_prob)
 
                 # 全結合層
-                #self.W_fc6 = tf.get_variable('W_fc6', [8, 1])
-                #self.b_fc6 = tf.get_variable('b_fc6', [1])
+                #self.W_fc6 = tf.get_variable('W_fc6', [8, 1], initializer=weight_init)
+                #self.b_fc6 = tf.get_variable('b_fc6', [1], initializer=bias_init)
                 #linarg = tf.matmul(h5_drop, self.W_fc6) + self.b_fc6
                 
                 #h5 = tf.nn.sigmoid(linarg)
@@ -258,57 +275,22 @@ class Discriminator(object):
         return self.output, self.output_aff
 
 
+
 z = tf.placeholder("float", [None, 100])
 images = tf.placeholder("float", [None, 128*128*3])
 keep_prob = tf.placeholder(tf.float32)
 
-
 def make_model(z, images):
     g = Generator(z, 100)
     fake_img = Generator.output(g)
-    
     d_fake = Discriminator(fake_img)                # 偽物用
     d_fake_out, d_logits_f = Discriminator.output(d_fake)
     d_true = Discriminator(images, reuse=True)      # 本物用(重み共有)
     d_true_out, d_logits_t = Discriminator.output(d_true)
 
     # 損失関数
-    
-
-    
-    """
-    zeros = tf.random_uniform([MINI_BATCH, 1], minval=0.0, maxval=0.3)
-    ones = tf.random_uniform([MINI_BATCH, 1], minval=0.7, maxval=1.0)
-
-    tf.add_to_collection('d_losses', tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_t, labels=ones)))
-    tf.add_to_collection('d_losses', tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_f, labels=zeros)))
-    
-    tf.add_to_collection('g_losses', tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_f, labels=ones)))
-    #tf.add_to_collection('g_losses', tf.reduce_mean(
-    #    tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_t, labels=zeros)))
-
-    
-    tf.add_to_collection('d_losses', tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_t, labels= tf.ones_like(d_true_out))))
-    tf.add_to_collection('d_losses', tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_f, labels= zeros)))
-    tf.add_to_collection('g_losses', tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_f, labels= tf.ones_like(d_fake_out))))
-
-    
-    tf.add_to_collection('g_losses', tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_t, labels= tf.zeros_like(d_true_out))))
-    """
-
-    #g_loss = tf.add_n(tf.get_collection('g_losses'), name='total_g_loss')
-    #d_loss = tf.add_n(tf.get_collection('d_losses'), name='total_d_loss')
-
     g_loss = -tf.reduce_mean(d_logits_f)
     d_loss = tf.reduce_mean(-d_logits_t) + tf.reduce_mean(d_logits_f)
-    
 
     # 変数初期化
     t_vars = tf.trainable_variables()
@@ -317,6 +299,7 @@ def make_model(z, images):
     g_vars = [var for var in t_vars if 'generator' in var.name]
 
     return d_loss, g_loss, d_vars, g_vars, fake_img, d_fake_out, d_true_out
+
 
 # モデル作成
 d_loss, g_loss, d_vars, g_vars, fake_img, d_fake, d_true = make_model(z, images)
@@ -344,108 +327,167 @@ def img_flat_read(fpass):
     # INPUT_WxINPUT_Hにリサイズ
     img_64 = cv2.resize(img, (INPUT_W, INPUT_H))
     # 1列にし-1～1のfloatに
-    
     img_flat = 2.0 * img_64.reshape([1, INPUT_NUM]) / 255.0 - 1.0
     img_flat_rev = 2.0 * cv2.flip(img_64, 1).reshape([1, INPUT_NUM]) / 255.0 - 1.0
         
     return img_flat, img_flat_rev
 
+# 学習データ
+#train_x = np.zeros([TRAIN_NUM, INPUT_NUM])
+#train_t = np.zeros([TRAIN_NUM, CATEGORY_NUM])
+
 class CVBatch:
     def __init__(self, num):
         self.num = num
-        self.images = np.zeros([num, INPUT_NUM])
+        self.images = np.zeros([TRAIN_NUM, INPUT_NUM])
         self.nowCnt = 0
         self.nowIndex = 0
     def loadImage(self, fpass):
-        self.images[self.nowCnt], self.images[self.nowCnt+1] = img_flat_read(fpass)
-        self.nowCnt+=2
-        
+        self.images[self.nowCnt], img = img_flat_read(fpass)
+        self.nowCnt+=1
+        return img
     
     def nextBatch(self, n):
+        start = self.nowIndex
+        end = self.nowIndex+n
+        if end >= self.num:
+            end = self.num - 1
+            self.nowIndex = 0
+            res = self.images[start:end]
 
-        res = self.images[0:n]
-        np.random.shuffle(self.images)
-        return res
+            # シャッフル
+            #l = len(self.images)
+            #rnd1 = np.random.randint(0, l)
+            #np.random.shuffle(self.images)
+        else:
+            self.nowIndex = end
+            res = self.images[start:end]
+        return res, end - start
         
     
 
-fileList = os.listdir("train/")
+#fileList = os.listdir("train/")
 
 # 学習データ読み込み
 
-cvBatch = CVBatch(TRAIN_NUM)
+#cvBatch = CVBatch(TRAIN_NUM)
 
-i = 0
-for file in sorted(fileList):
-    print(file)
+#i = 0
+#for file in sorted(fileList):
+    #print(file)
     #train_x[i],img = img_flat_read('train/' + file)
-    CVBatch.loadImage(cvBatch, 'train/' + file)
-    i+=1
+    #img = CVBatch.loadImage(cvBatch, 'train/' + file)
+#   i+=1
+
+sliderLen = 100
+
+print("loading")
 
 # 学習
-gpuConfig = tf.ConfigProto(
-    gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.75),
-    device_count={'GPU': 1})
-
-with tf.Session(config=gpuConfig) as sess:
+with tf.Session() as sess:
     sess.run(init)
-
     saver = tf.train.Saver()
+    saver.restore(sess, "./modelTest/model.ckpt")
 
-    saver.restore(sess, "./model/model.ckpt")
+    def slider_value_change(event):
+        obj = event.GetEventObject()
+        #frame.SetStatusText("Slider value is " + str(obj.GetValue()))
+        show_pre()
 
-    zTest = np.zeros([MINI_BATCH, 100]).astype(np.float32)
-
-    for itr in range(MINI_BATCH):
-        zTest[itr][itr] = 1
-
-    init_step = 97865
-
-    for i in range(100000):
-
-        # バッチをとってくる
-        #img_input = CVBatch.nextBatch(cvBatch, MINI_BATCH)
+    def click_button_create(event):
+        show_pre()
         
+    def click_button_save(event):
 
-        for j in range(2):
-            zInput = np.random.uniform(-1.0, 1.0, size=[MINI_BATCH, 100]).astype(np.float32)
-            #zInput = normal(loc = 0, scale = 0.5, size=[MINI_BATCH, 100]).astype(np.float32)
-            img_input = CVBatch.nextBatch(cvBatch, MINI_BATCH)
-            d_optim.run(feed_dict={z:zInput, images:img_input, keep_prob: 0.5})
-            sess.run(w_clip)
-        
-        zInput = np.random.uniform(-1.0, 1.0, size=[MINI_BATCH, 100]).astype(np.float32)
-        #zInput = normal(loc = 0, scale = 0.5, size=[MINI_BATCH, 100]).astype(np.float32)
+        zInput = [[]]
 
-        g_optim.run(feed_dict={z:zInput, keep_prob: 0.5})
-        
-        if i % 5 == 0:
-
-            # 誤差関数
-            loss_val_d, loss_val_g, img, d_f, d_t  = sess.run([d_loss, g_loss, fake_img, d_fake, d_true],
-                feed_dict={z:zTest, images:img_input, keep_prob: 1.0})
-            #print(d_f)
-            print("Step:%5d, Loss{G:%3.8f, D:%3.8f} fake:%2.8f true:%2.8f"%(i+init_step,loss_val_g, loss_val_d, np.average(d_f), np.average(d_t)))
-
-            #cv2.imshow('image', img[0])
-            #cv2.waitKey(0)
-
-            # 画像を連結
-            img2 = [img[0],img[6],img[12],img[18],img[24],img[30]]
-
-
-            for k in range(6):
-                for j in range(6):
-                    if j != 0:
-                        img2[k] = cv2.hconcat([img2[k], img[k*6+j]])
-                if k == 0:
-                    img3 = img2[0]
-                else:
-                    img3 = cv2.vconcat([img3, img2[k]])
-                
-            cv2.imwrite('./res/'+str(i+init_step)+'.jpg', 255 * 0.5 * (img3+1.0))
+        seed = ""
+        for i in range(sliderLen):
+            #print(sliderList[i].GetValue())
+            zInput[0].append(sliderList[i].GetValue() / 100.0)
+            seed += '%02X'%(sliderList[i].GetValue()+100)
             
-        if ((i+init_step) % 200 == 0 and i != 0):
-            print("saving...")
-            saver.save(sess, "./model/model.ckpt")
-            print("ok")
+        img = sess.run(fake_img, feed_dict={z:zInput, keep_prob: 0.5})
+
+        cv2.imwrite('./out.jpg',  255 * (img[0]))
+
+        # seed値
+        print("saved!\nseed:" + seed + "\n")
+        
+    def click_button_rnd(event):
+        for i in range(sliderLen):
+            sliderList[i].SetValue(randint(-100, 100+1))
+        show_pre()    
+        
+            
+    def click_button_reset(event):
+        for i in range(sliderLen):
+            sliderList[i].SetValue(0)
+        show_pre()
+            
+    def show_pre():
+        
+        zInput = [[]]
+
+        seed = ""
+        for i in range(sliderLen):
+            #print(sliderList[i].GetValue())
+            zInput[0].append(sliderList[i].GetValue() / 100.0)
+            seed += '%02X'%(sliderList[i].GetValue()+100)
+
+        # seed値
+        print("seed:" + seed + "\n")
+            
+        img = sess.run(fake_img, feed_dict={z:zInput, keep_prob: 0.5})
+
+        simg = (img[0])
+        #simg = cv2.resize(simg,(256,256))
+        cv2.imshow("preview", (simg))
+        #cv2.waitKey(0)
+        
+    application = wx.App()
+    frame = wx.Frame(None, wx.ID_ANY, u"generator", size=(1500,1000))
+    frame.CreateStatusBar()
+
+    panel = wx.Panel(frame, wx.ID_ANY)
+    layout = wx.GridSizer(5, 21, 1)
+    sliderList = []
+
+    for i in range(sliderLen):
+
+        slider = wx.Slider(panel, style=wx.SL_LABELS)
+        slider.SetMin(-100)
+        slider.SetMax(100)
+        slider.Bind(wx.EVT_SLIDER, slider_value_change)
+        sliderList.append(slider)
+        slider.SetValue(randint(-100, 100+1))
+        layout.Add(slider, flag=wx.GROW)
+
+    # 作成ボタン
+    button_create = wx.Button(panel, wx.ID_ANY, u"表示")
+    button_create.Bind(wx.EVT_BUTTON, click_button_create)
+
+    # ランダムボタン
+    button_rnd = wx.Button(panel, wx.ID_ANY, u"ランダムにする")
+    button_rnd.Bind(wx.EVT_BUTTON, click_button_rnd)
+
+    # すべて0にするボタン
+    button_reset = wx.Button(panel, wx.ID_ANY, u"すべて0にする")
+    button_reset.Bind(wx.EVT_BUTTON, click_button_reset)
+
+    # 保存ボタン
+    button_save = wx.Button(panel, wx.ID_ANY, u"保存")
+    button_save.Bind(wx.EVT_BUTTON, click_button_save)
+
+    layout.Add(button_create, 0, wx.GROW)
+    layout.Add(button_rnd, 0, wx.GROW)
+    layout.Add(button_reset, 0, wx.GROW)
+    layout.Add(button_save, 0, wx.GROW)
+        
+    panel.SetSizer(layout)
+
+    print("complete")
+    show_pre()
+    
+    frame.Show()
+    application.MainLoop()

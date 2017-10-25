@@ -435,15 +435,15 @@ with tf.Session() as sess:
             zInput[0].append(sliderList[i].GetValue() / 100.0)
             seed += '%02X'%(sliderList[i].GetValue()+100)
 
-        # seed値
-        print("seed:" + seed + "\n")
             
-        img = sess.run(fake_img, feed_dict={z:zInput, keep_prob: 0.5})
+        img, gl = sess.run([fake_img, g_loss], feed_dict={z:zInput, keep_prob: 0.5})
 
         simg = (img[0])
         #simg = cv2.resize(simg,(256,256))
         cv2.imshow("preview", (simg))
-        #cv2.waitKey(0)
+        # seed値
+        print("seed:" + seed)
+        print("g_loss:" + str(gl) + "\n")
         
     application = wx.App()
     frame = wx.Frame(None, wx.ID_ANY, u"generator", size=(1500,1000))

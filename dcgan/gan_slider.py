@@ -409,7 +409,7 @@ with tf.Session() as sess:
             
         img = sess.run(fake_img, feed_dict={z:zInput, keep_prob: 0.5})
 
-        cv2.imwrite('./out.jpg',  255 * (img[0]))
+        cv2.imwrite('./' + seed +'.jpg',  255 * (img[0]))
 
         # seed値
         print("saved!\nseed:" + seed + "\n")
